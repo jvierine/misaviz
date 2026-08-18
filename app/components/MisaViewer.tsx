@@ -11,6 +11,7 @@ import {
 } from "../lib/eclipse";
 import { decodeFloat16, normalizeFloat16 } from "../lib/float16";
 import { makeAltitudeGrid } from "../lib/altitudeGrid";
+import { makeBeamFootprints, updateBeamFootprints } from "../lib/beamFootprints";
 import { makeMisaAntenna, pointMisaAntenna, type MisaAntenna } from "../lib/misaAntenna";
 
 type ArraySpec = { offset: number; count: number; type: "u32" | "u16" | "f16" };
@@ -532,6 +533,8 @@ export default function MisaViewer() {
         );
         beamLine.renderOrder = 21;
         radarLayer.add(beamLine);
+        const beamFootprints = makeBeamFootprints();
+        radarLayer.add(beamFootprints.group);
         const engine: Engine = {
           material,
           earthMaterial,
@@ -669,11 +672,14 @@ export default function MisaViewer() {
             const up = positions[firstPoint * 3 + 1];
             const south = positions[firstPoint * 3 + 2];
             const horizontal = Math.hypot(east, south);
+            const beamAzimuth = THREE.MathUtils.radToDeg(Math.atan2(east, -south));
+            const beamElevation = THREE.MathUtils.radToDeg(Math.atan2(up, horizontal));
             pointMisaAntenna(
               antenna,
-              THREE.MathUtils.radToDeg(Math.atan2(east, -south)),
-              THREE.MathUtils.radToDeg(Math.atan2(up, horizontal)),
+              beamAzimuth,
+              beamElevation,
             );
+            updateBeamFootprints(beamFootprints, beamAzimuth, beamElevation);
           }
           controls.update();
           renderer.render(scene, camera);

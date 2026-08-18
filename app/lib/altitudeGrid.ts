@@ -3,19 +3,22 @@ import * as THREE from "three";
 const EARTH_RADIUS_KM = 6371;
 const LABELLED_ALTITUDES = new Set([100, 200, 400, 600, 800, 1000]);
 
-function makeTextSprite(text: string) {
-  const fontSize = 40;
+function makeTextSprite(lines: readonly string[]) {
+  const fontSize = 38;
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create altitude label canvas");
   context.font = `600 ${fontSize}px "Neue Haas Grotesk Text Pro", "Helvetica Neue", Arial, sans-serif`;
-  const metrics = context.measureText(text);
-  canvas.width = Math.ceil(metrics.width + 36);
-  canvas.height = Math.ceil(fontSize * 1.55);
+  const width = Math.max(...lines.map((line) => context.measureText(line).width));
+  const lineHeight = fontSize * 1.18;
+  canvas.width = Math.ceil(width + 36);
+  canvas.height = Math.ceil(lineHeight * lines.length + 20);
   context.font = `600 ${fontSize}px "Neue Haas Grotesk Text Pro", "Helvetica Neue", Arial, sans-serif`;
   context.fillStyle = "#ffffff";
   context.textBaseline = "middle";
-  context.fillText(text, 18, canvas.height / 2);
+  for (let index = 0; index < lines.length; index += 1) {
+    context.fillText(lines[index], 18, 10 + lineHeight * (index + 0.5));
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -26,12 +29,12 @@ function makeTextSprite(text: string) {
     depthWrite: false,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(canvas.width * 0.8, canvas.height * 0.8, 1);
+  sprite.scale.set(canvas.width * 0.72, canvas.height * 0.72, 1);
   sprite.renderOrder = 1001;
   return sprite;
 }
 
-function slantRangeForAltitude(altitudeKm: number, elevationRad: number) {
+export function slantRangeForAltitude(altitudeKm: number, elevationRad: number) {
   const cosine = Math.cos(elevationRad);
   const sine = Math.sin(elevationRad);
   let low = 0;
@@ -102,7 +105,12 @@ function addSweepEdgeAxis(
     group.add(tick);
 
     if (LABELLED_ALTITUDES.has(altitude)) {
-      const label = makeTextSprite(`${altitude} km`);
+      const range = slantRangeForAltitude(altitude, elevation);
+      const roundedRange = Math.round(range / 10) * 10;
+      const label = makeTextSprite([
+        `${roundedRange} km RANGE`,
+        `${altitude} km ALT`,
+      ]);
       label.position.copy(tickOrigin).addScaledVector(outward, 155);
       group.add(label);
     }
