@@ -1,40 +1,22 @@
 import * as THREE from "three";
 
 const EARTH_RADIUS_KM = 6371;
+const LABELLED_ALTITUDES = new Set([100, 200, 400, 600, 800, 1000]);
 
-type GeographicAnchor = {
-  name: string;
-  latitude: number;
-  longitude: number;
-};
-
-const ALTITUDE_ANCHORS: readonly GeographicAnchor[] = [
-  { name: "FLORIDA", latitude: 28.1, longitude: -81.6 },
-  { name: "HEARST", latitude: 49.6866, longitude: -83.6545 },
-];
-
-function ecefDirection(latitudeDeg: number, longitudeDeg: number) {
-  const latitude = THREE.MathUtils.degToRad(latitudeDeg);
-  const longitude = THREE.MathUtils.degToRad(longitudeDeg);
-  return new THREE.Vector3(
-    Math.cos(latitude) * Math.cos(longitude),
-    Math.cos(latitude) * Math.sin(longitude),
-    Math.sin(latitude),
-  );
-}
-
-function makeTextSprite(text: string, fontSize = 25) {
+function makeTextSprite(text: string) {
+  const fontSize = 40;
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create altitude label canvas");
   context.font = `600 ${fontSize}px "Neue Haas Grotesk Text Pro", "Helvetica Neue", Arial, sans-serif`;
   const metrics = context.measureText(text);
-  canvas.width = Math.ceil(metrics.width + 28);
+  canvas.width = Math.ceil(metrics.width + 36);
   canvas.height = Math.ceil(fontSize * 1.55);
   context.font = `600 ${fontSize}px "Neue Haas Grotesk Text Pro", "Helvetica Neue", Arial, sans-serif`;
   context.fillStyle = "#ffffff";
   context.textBaseline = "middle";
-  context.fillText(text, 14, canvas.height / 2);
+  context.fillText(text, 18, canvas.height / 2);
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const material = new THREE.SpriteMaterial({
@@ -44,94 +26,99 @@ function makeTextSprite(text: string, fontSize = 25) {
     depthWrite: false,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(canvas.width * 0.55, canvas.height * 0.55, 1);
+  sprite.scale.set(canvas.width * 0.8, canvas.height * 0.8, 1);
   sprite.renderOrder = 1001;
   return sprite;
 }
 
-function localBasis(stationLat: number, stationLon: number) {
-  const latitude = THREE.MathUtils.degToRad(stationLat);
-  const longitude = THREE.MathUtils.degToRad(stationLon);
-  return {
-    up: ecefDirection(stationLat, stationLon),
-    east: new THREE.Vector3(-Math.sin(longitude), Math.cos(longitude), 0),
-    north: new THREE.Vector3(
-      -Math.sin(latitude) * Math.cos(longitude),
-      -Math.sin(latitude) * Math.sin(longitude),
-      Math.cos(latitude),
-    ),
-  };
+function slantRangeForAltitude(altitudeKm: number, elevationRad: number) {
+  const cosine = Math.cos(elevationRad);
+  const sine = Math.sin(elevationRad);
+  let low = 0;
+  let high = 5000;
+  for (let iteration = 0; iteration < 60; iteration += 1) {
+    const range = (low + high) / 2;
+    const horizontal = range * cosine;
+    const groundHeight = Math.sqrt(
+      Math.max(0, EARTH_RADIUS_KM ** 2 - horizontal ** 2),
+    ) - EARTH_RADIUS_KM;
+    const altitude = range * sine - groundHeight;
+    if (altitude < altitudeKm) low = range;
+    else high = range;
+  }
+  return (low + high) / 2;
 }
 
-function ecefVectorToScene(vector: THREE.Vector3, basis: ReturnType<typeof localBasis>) {
-  return new THREE.Vector3(
-    vector.dot(basis.east),
-    vector.dot(basis.up),
-    -vector.dot(basis.north),
-  );
-}
-
-function addAltitudeAxis(
+function addSweepEdgeAxis(
   group: THREE.Group,
-  anchor: GeographicAnchor,
-  basis: ReturnType<typeof localBasis>,
+  azimuthDeg: number,
+  elevationDeg: number,
+  outwardSign: number,
 ) {
-  const radialEcef = ecefDirection(anchor.latitude, anchor.longitude);
-  const groundEcef = radialEcef.clone().sub(basis.up).multiplyScalar(EARTH_RADIUS_KM);
-  const ground = ecefVectorToScene(groundEcef, basis);
-  const radial = ecefVectorToScene(radialEcef, basis).normalize();
-  const longitude = THREE.MathUtils.degToRad(anchor.longitude);
-  const eastEcef = new THREE.Vector3(-Math.sin(longitude), Math.cos(longitude), 0);
-  const tickDirection = ecefVectorToScene(eastEcef, basis).normalize();
+  const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
+  const elevation = THREE.MathUtils.degToRad(elevationDeg);
+  const direction = new THREE.Vector3(
+    Math.cos(elevation) * Math.sin(azimuth),
+    Math.sin(elevation),
+    -Math.cos(elevation) * Math.cos(azimuth),
+  ).normalize();
+  const outward = new THREE.Vector3(
+    Math.cos(azimuth),
+    0,
+    Math.sin(azimuth),
+  ).multiplyScalar(outwardSign).normalize();
   const material = new THREE.LineBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.86,
+    opacity: 0.92,
     depthTest: false,
     depthWrite: false,
   });
 
-  const mainLine = new THREE.Line(
+  const pointAtAltitude = (altitudeKm: number) => direction.clone().multiplyScalar(
+    slantRangeForAltitude(altitudeKm, elevation),
+  );
+  const axis = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([
-      ground.clone().addScaledVector(radial, 100),
-      ground.clone().addScaledVector(radial, 1000),
+      pointAtAltitude(100),
+      pointAtAltitude(1000),
     ]),
     material,
   );
-  mainLine.renderOrder = 1000;
-  group.add(mainLine);
+  axis.renderOrder = 1000;
+  group.add(axis);
 
   for (let altitude = 100; altitude <= 1000; altitude += 100) {
-    const tickLength = altitude % 500 === 0 ? 90 : 55;
-    const tickOrigin = ground.clone().addScaledVector(radial, altitude);
-    const tickLine = new THREE.Line(
+    const tickOrigin = pointAtAltitude(altitude);
+    const tickLength = altitude % 500 === 0 ? 95 : 60;
+    const tick = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([
         tickOrigin,
-        tickOrigin.clone().addScaledVector(tickDirection, tickLength),
+        tickOrigin.clone().addScaledVector(outward, tickLength),
       ]),
       material,
     );
-    tickLine.renderOrder = 1000;
-    group.add(tickLine);
+    tick.renderOrder = 1000;
+    group.add(tick);
 
-    if (altitude === 100 || altitude === 1000 || altitude % 200 === 0) {
+    if (LABELLED_ALTITUDES.has(altitude)) {
       const label = makeTextSprite(`${altitude} km`);
-      label.position.copy(tickOrigin).addScaledVector(tickDirection, 120);
+      label.position.copy(tickOrigin).addScaledVector(outward, 155);
       group.add(label);
     }
   }
-
-  const placeLabel = makeTextSprite(anchor.name, 22);
-  placeLabel.position.copy(ground).addScaledVector(radial, 55).addScaledVector(tickDirection, 75);
-  group.add(placeLabel);
 }
 
-/** Two local-radial altitude rulers, following the Bernstein viewer's 100 km ticks. */
-export function makeAltitudeGrid(stationLat: number, stationLon: number) {
+/** Altitude rulers following the north and south boundaries of the radar sector. */
+export function makeAltitudeGrid(
+  northAzimuthDeg: number,
+  southAzimuthDeg: number,
+  elevationDeg: number,
+) {
   const group = new THREE.Group();
-  group.name = "Geographic altitude axes";
-  const basis = localBasis(stationLat, stationLon);
-  for (const anchor of ALTITUDE_ANCHORS) addAltitudeAxis(group, anchor, basis);
+  group.name = "Sweep-edge altitude axes";
+  addSweepEdgeAxis(group, northAzimuthDeg, elevationDeg, 1);
+  addSweepEdgeAxis(group, southAzimuthDeg, elevationDeg, -1);
   group.renderOrder = 1000;
   return group;
 }

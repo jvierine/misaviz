@@ -413,6 +413,15 @@ export default function MisaViewer() {
           pointTimes[index] = timestamps[pointRecordIndex[index]] - loadedManifest.startUnix;
         }
         const recordLookup = makeRecordLookup(pointRecordIndex, loadedManifest.recordCount);
+        let northAzimuth = -Infinity;
+        let southAzimuth = Infinity;
+        let elevationSum = 0;
+        for (let index = 0; index < azimuthValues.length; index += 1) {
+          northAzimuth = Math.max(northAzimuth, azimuthValues[index]);
+          southAzimuth = Math.min(southAzimuth, azimuthValues[index]);
+          elevationSum += elevationValues[index];
+        }
+        const sweepElevation = elevationSum / Math.max(1, elevationValues.length);
         const pointExpiry = makePersistenceExpiry(
           timestamps,
           azimuthValues,
@@ -474,7 +483,7 @@ export default function MisaViewer() {
         const earthMaterial = makeEarthMaterial(texture);
         const earth = new THREE.Mesh(earthGeometry, earthMaterial);
         scene.add(earth);
-        scene.add(makeAltitudeGrid(loadedManifest.station.lat, loadedManifest.station.lon));
+        scene.add(makeAltitudeGrid(northAzimuth, southAzimuth, sweepElevation));
 
         const sweep = makeNativeSweepGeometry(
           positions,
