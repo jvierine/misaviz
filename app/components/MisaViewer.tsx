@@ -358,7 +358,7 @@ const SWEEP_FRAGMENT_SHADER = `
   void main() {
     if (vAlpha <= 0.001) discard;
     vec3 color = mix(turbo(vValue), seismic(vValue), uDiverging);
-    gl_FragColor = vec4(color, vAlpha * 0.82);
+    gl_FragColor = vec4(color, vAlpha);
   }
 `;
 
@@ -434,7 +434,7 @@ export default function MisaViewer() {
         scene.background = new THREE.Color(0x020812);
         scene.fog = new THREE.FogExp2(0x020812, 0.00023);
 
-        const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 18000);
+        const camera = new THREE.PerspectiveCamera(45, 1, 0.2, 10000);
         camera.position.set(-1050, 900, 1060);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -495,12 +495,15 @@ export default function MisaViewer() {
           fragmentShader: SWEEP_FRAGMENT_SHADER,
           transparent: true,
           depthWrite: false,
+          depthTest: false,
           blending: THREE.NormalBlending,
           side: THREE.DoubleSide,
         });
         const radarLayer = new THREE.Group();
         radarLayer.visible = true;
-        radarLayer.add(new THREE.Mesh(geometry, material));
+        const sweepMesh = new THREE.Mesh(geometry, material);
+        sweepMesh.renderOrder = 20;
+        radarLayer.add(sweepMesh);
         scene.add(radarLayer);
 
         const antenna = makeMisaAntenna();
@@ -510,8 +513,15 @@ export default function MisaViewer() {
         beamGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(72 * 3), 3));
         const beamLine = new THREE.Line(
           beamGeometry,
-          new THREE.LineBasicMaterial({ color: 0xf7fbff, transparent: true, opacity: 0.9 }),
+          new THREE.LineBasicMaterial({
+            color: 0xf7fbff,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+            depthWrite: false,
+          }),
         );
+        beamLine.renderOrder = 21;
         radarLayer.add(beamLine);
         const engine: Engine = {
           material,
@@ -557,21 +567,21 @@ export default function MisaViewer() {
         observer.observe(mountRef.current);
         resize();
 
+        const pressedKeys = new Set<string>();
+        let keyboardOrbitVelocity = 0;
+        let keyboardElevationVelocity = 0;
         const keydown = (event: KeyboardEvent) => {
           const target = event.target as HTMLElement | null;
           if (target?.matches("input, select, textarea, button")) return;
           if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
           event.preventDefault();
-          const spherical = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
-          const step = THREE.MathUtils.degToRad(4);
-          if (event.key === "ArrowLeft") spherical.theta += step;
-          if (event.key === "ArrowRight") spherical.theta -= step;
-          if (event.key === "ArrowUp") spherical.phi = Math.max(0.08, spherical.phi - step);
-          if (event.key === "ArrowDown") spherical.phi = Math.min(Math.PI / 2 - 0.02, spherical.phi + step);
-          camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(spherical));
-          controls.update();
+          pressedKeys.add(event.key);
         };
+        const keyup = (event: KeyboardEvent) => pressedKeys.delete(event.key);
+        const clearKeys = () => pressedKeys.clear();
         window.addEventListener("keydown", keydown);
+        window.addEventListener("keyup", keyup);
+        window.addEventListener("blur", clearKeys);
 
         let last = performance.now();
         const animate = (now: number) => {
@@ -586,6 +596,36 @@ export default function MisaViewer() {
               setCurrentTime(next);
               lastUiUpdateRef.current = now;
             }
+          }
+
+          const orbitInput = Number(pressedKeys.has("ArrowLeft")) - Number(pressedKeys.has("ArrowRight"));
+          const elevationInput = Number(pressedKeys.has("ArrowDown")) - Number(pressedKeys.has("ArrowUp"));
+          const keyboardSpeed = THREE.MathUtils.degToRad(42);
+          const response = 1 - Math.exp(-delta * 11);
+          keyboardOrbitVelocity = THREE.MathUtils.lerp(keyboardOrbitVelocity, orbitInput * keyboardSpeed, response);
+          keyboardElevationVelocity = THREE.MathUtils.lerp(
+            keyboardElevationVelocity,
+            elevationInput * keyboardSpeed,
+            response,
+          );
+          if (Math.abs(keyboardOrbitVelocity) > 1e-5 || Math.abs(keyboardElevationVelocity) > 1e-5) {
+            const spherical = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
+            spherical.theta += keyboardOrbitVelocity * delta;
+            spherical.phi = THREE.MathUtils.clamp(
+              spherical.phi + keyboardElevationVelocity * delta,
+              0.08,
+              Math.PI / 2 - 0.02,
+            );
+            camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(spherical));
+          }
+
+          const cameraDistance = camera.position.distanceTo(controls.target);
+          const nextNear = Math.max(0.0005, cameraDistance / 5000);
+          const nextFar = Math.max(3000, cameraDistance * 5);
+          if (Math.abs(camera.near - nextNear) / nextNear > 0.01 || Math.abs(camera.far - nextFar) / nextFar > 0.01) {
+            camera.near = nextNear;
+            camera.far = nextFar;
+            camera.updateProjectionMatrix();
           }
 
           const relativeTime = currentTimeRef.current - loadedManifest.startUnix;
@@ -635,6 +675,8 @@ export default function MisaViewer() {
         return () => {
           observer.disconnect();
           window.removeEventListener("keydown", keydown);
+          window.removeEventListener("keyup", keyup);
+          window.removeEventListener("blur", clearKeys);
         };
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to initialize the viewer");
