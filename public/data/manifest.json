@@ -1,0 +1,133 @@
+{
+  "schema": "misa.wiper.float16.v1",
+  "description": "MISA uncoded 2 ms long-pulse scans below 10 degrees elevation",
+  "station": {
+    "name": "Millstone Hill",
+    "lat": 42.6195,
+    "lon": -71.49173,
+    "altKm": 0.146
+  },
+  "kindat": 3430,
+  "modeType": 115,
+  "pulseLengthSeconds": 0.002,
+  "scanDurationSeconds": 700,
+  "recordCount": 3025,
+  "rangeCount": 66,
+  "pointCount": 84700,
+  "startUnix": 1712449226,
+  "endUnix": 1712707121,
+  "days": [
+    {
+      "label": "240407",
+      "source": "mlh240407k.004.hdf5",
+      "recordStart": 0,
+      "recordCount": 1026,
+      "startUnix": 1712449226,
+      "endUnix": 1712534895
+    },
+    {
+      "label": "240408",
+      "source": "mlh240408k.004.hdf5",
+      "recordStart": 1026,
+      "recordCount": 987,
+      "startUnix": 1712536409,
+      "endUnix": 1712620416
+    },
+    {
+      "label": "240409",
+      "source": "mlh240409k.003.hdf5",
+      "recordStart": 2013,
+      "recordCount": 1012,
+      "startUnix": 1712621937,
+      "endUnix": 1712707121
+    }
+  ],
+  "parameterRanges": {
+    "logNe": [
+      9.512623222503688,
+      11.881042780860488
+    ],
+    "ti": [
+      0.0,
+      2008.0
+    ],
+    "te": [
+      0.0,
+      4186.712039999999
+    ],
+    "vi": [
+      -694.832,
+      694.832
+    ]
+  },
+  "arrays": {
+    "timestamps": {
+      "offset": 0,
+      "count": 3025,
+      "type": "u32"
+    },
+    "azimuth": {
+      "offset": 12100,
+      "count": 3025,
+      "type": "f16"
+    },
+    "elevation": {
+      "offset": 18150,
+      "count": 3025,
+      "type": "f16"
+    },
+    "cycle": {
+      "offset": 24200,
+      "count": 3025,
+      "type": "u16"
+    },
+    "pointRecordIndex": {
+      "offset": 30250,
+      "count": 84700,
+      "type": "u16"
+    },
+    "x": {
+      "offset": 199650,
+      "count": 84700,
+      "type": "f16"
+    },
+    "y": {
+      "offset": 369050,
+      "count": 84700,
+      "type": "f16"
+    },
+    "z": {
+      "offset": 538450,
+      "count": 84700,
+      "type": "f16"
+    },
+    "logNe": {
+      "offset": 707850,
+      "count": 84700,
+      "type": "f16"
+    },
+    "ti": {
+      "offset": 877250,
+      "count": 84700,
+      "type": "f16"
+    },
+    "te": {
+      "offset": 1046650,
+      "count": 84700,
+      "type": "f16"
+    },
+    "vi": {
+      "offset": 1216050,
+      "count": 84700,
+      "type": "f16"
+    }
+  },
+  "binary": "misa-wiper-f16.bin",
+  "binaryBytes": 1385450,
+  "storage": "IEEE 754 binary16 for geometry and plasma parameters; integer timestamps and indices",
+  "coordinateTransform": {
+    "model": "WGS-84 geodetic to ECEF, then ECEF to Millstone east/up/south",
+    "implementation": "NumPy-vectorized jcoord equations",
+    "source": "https://github.com/jvierine/jcoord/blob/main/src/jcoord/jcoord.py"
+  }
+}
