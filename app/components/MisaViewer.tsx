@@ -180,9 +180,10 @@ function makeEarthMaterial(texture: THREE.Texture) {
 }
 
 function makeEarthPatchGeometry(stationLat: number, stationLon: number) {
-  const extentKm = 3600;
-  const segments = 180;
-  const geometry = new THREE.PlaneGeometry(extentKm, extentKm, segments, segments);
+  // A complete globe prevents any map boundary from entering the viewport at
+  // maximum zoom. Its north pole is remapped into ECEF by the local basis below.
+  const geometry = new THREE.SphereGeometry(EARTH_RADIUS_KM, 256, 128);
+  geometry.translate(0, -EARTH_RADIUS_KM, 0);
   const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
   const ecefDirections = new Float32Array(positions.count * 3);
   const lat = THREE.MathUtils.degToRad(stationLat);
@@ -201,11 +202,9 @@ function makeEarthPatchGeometry(stationLat: number, stationLon: number) {
   const direction = new THREE.Vector3();
   for (let index = 0; index < positions.count; index += 1) {
     const eastKm = positions.getX(index);
-    const northKm = positions.getY(index);
-    const horizontalSquared = eastKm * eastKm + northKm * northKm;
-    const upKm = Math.sqrt(Math.max(0, EARTH_RADIUS_KM * EARTH_RADIUS_KM - horizontalSquared)) - EARTH_RADIUS_KM;
-    positions.setXYZ(index, eastKm, upKm, -northKm);
-    direction.copy(stationUp)
+    const upFromCenterKm = positions.getY(index) + EARTH_RADIUS_KM;
+    const northKm = -positions.getZ(index);
+    direction.copy(stationUp).multiplyScalar(upFromCenterKm / EARTH_RADIUS_KM)
       .addScaledVector(eastBasis, eastKm / EARTH_RADIUS_KM)
       .addScaledVector(northBasis, northKm / EARTH_RADIUS_KM)
       .normalize();
@@ -467,7 +466,7 @@ export default function MisaViewer() {
         scene.background = new THREE.Color(0x020812);
         scene.fog = new THREE.FogExp2(0x020812, 0.00023);
 
-        const camera = new THREE.PerspectiveCamera(45, 1, 0.2, 10000);
+        const camera = new THREE.PerspectiveCamera(45, 1, 0.2, 50000);
         camera.position.set(-1050, 900, 1060);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -484,7 +483,7 @@ export default function MisaViewer() {
         controls.dampingFactor = 0.07;
         controls.enablePan = false;
         controls.minDistance = 0.055;
-        controls.maxDistance = 4400;
+        controls.maxDistance = 10000;
         controls.rotateSpeed = 0.55;
         controls.zoomSpeed = 0.8;
         controls.update();
@@ -667,7 +666,7 @@ export default function MisaViewer() {
 
           const cameraDistance = camera.position.distanceTo(controls.target);
           const nextNear = Math.max(0.0005, cameraDistance / 5000);
-          const nextFar = Math.max(3000, cameraDistance * 5);
+          const nextFar = Math.max(6000, cameraDistance * 5);
           if (Math.abs(camera.near - nextNear) / nextNear > 0.01 || Math.abs(camera.far - nextFar) / nextFar > 0.01) {
             camera.near = nextNear;
             camera.far = nextFar;
