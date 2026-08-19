@@ -55,6 +55,6 @@ the packed radar-ray geometry.
 - [MISA reference photograph](https://commons.wikimedia.org/wiki/File:Millstone_Hill_Radar_-_Haystack_Observatory_-_DSC04019.JPG)
 - [NASA/GSFC 8 April 2024 eclipse path](https://eclipse.gsfc.nasa.gov/SEhistory/SEpath/SE2024Apr08Tpath.html)
 - [Bernstein/Sanya ISR visualization](https://juha.no/bernstein/interactive_sanya_isr.html)
-- NASA Blue Marble Next Generation Earth imagery
+- [NASA Blue Marble Next Generation Earth imagery](https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-map/)
 
 The MIT Haystack name and logo remain the property of MIT Haystack Observatory.

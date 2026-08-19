@@ -27,9 +27,12 @@ function makeTextSprite(lines: readonly string[]) {
     transparent: true,
     depthTest: false,
     depthWrite: false,
+    sizeAttenuation: false,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(canvas.width * 0.72, canvas.height * 0.72, 1);
+  const screenHeight = 0.055;
+  sprite.scale.set(screenHeight * canvas.width / canvas.height, screenHeight, 1);
+  sprite.userData.altitudeAxisLabel = true;
   sprite.renderOrder = 1001;
   return sprite;
 }
@@ -129,4 +132,10 @@ export function makeAltitudeGrid(
   addSweepEdgeAxis(group, southAzimuthDeg, elevationDeg, -1);
   group.renderOrder = 1000;
   return group;
+}
+
+export function setAltitudeLabelsVisible(group: THREE.Group, visible: boolean) {
+  group.traverse((object) => {
+    if (object.userData.altitudeAxisLabel) object.visible = visible;
+  });
 }

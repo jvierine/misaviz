@@ -10,8 +10,12 @@ import {
   UMBRA_ANGLE_RAD,
 } from "../lib/eclipse";
 import { decodeFloat16, normalizeFloat16 } from "../lib/float16";
-import { makeAltitudeGrid } from "../lib/altitudeGrid";
-import { makeBeamFootprints, updateBeamFootprints } from "../lib/beamFootprints";
+import { makeAltitudeGrid, setAltitudeLabelsVisible } from "../lib/altitudeGrid";
+import {
+  makeBeamFootprints,
+  updateBeamFootprints,
+  type BeamFootprints,
+} from "../lib/beamFootprints";
 import { makeMisaAntenna, pointMisaAntenna, type MisaAntenna } from "../lib/misaAntenna";
 
 type ArraySpec = { offset: number; count: number; type: "u32" | "u16" | "f16" };
@@ -44,6 +48,8 @@ type Engine = {
   recordCounts: Uint16Array;
   positions: Float32Array;
   beamGeometry: THREE.BufferGeometry;
+  altitudeGrid: THREE.Group;
+  beamFootprints: BeamFootprints;
   antenna: MisaAntenna;
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
@@ -64,7 +70,7 @@ const PARAMETER_META: Record<
 };
 
 const EARTH_RADIUS_KM = 6371;
-const PLAYBACK_RATE = 2400;
+const DEFAULT_PLAYBACK_RATE = 2400;
 const ECLIPSE_INITIAL_TIME = Date.UTC(2024, 3, 8, 19, 29, 0) / 1000;
 
 function assetUrl(path: string): string {
@@ -331,6 +337,8 @@ const SWEEP_VERTEX_SHADER = `
 
 const SWEEP_FRAGMENT_SHADER = `
   uniform float uDiverging;
+  uniform float uColorMin;
+  uniform float uColorMax;
   varying float vValue;
   varying float vAlpha;
 
@@ -358,7 +366,12 @@ const SWEEP_FRAGMENT_SHADER = `
 
   void main() {
     if (vAlpha <= 0.001) discard;
-    vec3 color = mix(turbo(vValue), seismic(vValue), uDiverging);
+    float colorValue = clamp(
+      (vValue - uColorMin) / max(uColorMax - uColorMin, 0.0001),
+      0.0,
+      1.0
+    );
+    vec3 color = mix(turbo(colorValue), seismic(colorValue), uDiverging);
     gl_FragColor = vec4(color, vAlpha);
   }
 `;
@@ -368,12 +381,18 @@ export default function MisaViewer() {
   const engineRef = useRef<Engine | null>(null);
   const currentTimeRef = useRef(0);
   const playingRef = useRef(false);
+  const playbackRateRef = useRef(DEFAULT_PLAYBACK_RATE);
   const lastUiUpdateRef = useRef(0);
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [parameter, setParameter] = useState<ParameterKey>("logNe");
   const [playing, setPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(DEFAULT_PLAYBACK_RATE);
   const [fadeHistory, setFadeHistory] = useState(true);
+  const [showAxisLabels, setShowAxisLabels] = useState(true);
+  const [showBeamWidth, setShowBeamWidth] = useState(true);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [colorLimits, setColorLimits] = useState<Record<ParameterKey, [number, number]> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -383,6 +402,10 @@ export default function MisaViewer() {
   useEffect(() => {
     playingRef.current = playing;
   }, [playing]);
+
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+  }, [playbackRate]);
 
   useEffect(() => {
     let disposed = false;
@@ -484,7 +507,8 @@ export default function MisaViewer() {
         const earthMaterial = makeEarthMaterial(texture);
         const earth = new THREE.Mesh(earthGeometry, earthMaterial);
         scene.add(earth);
-        scene.add(makeAltitudeGrid(northAzimuth, southAzimuth, sweepElevation));
+        const altitudeGrid = makeAltitudeGrid(northAzimuth, southAzimuth, sweepElevation);
+        scene.add(altitudeGrid);
 
         const sweep = makeNativeSweepGeometry(
           positions,
@@ -500,6 +524,8 @@ export default function MisaViewer() {
             uFadeWindow: { value: loadedManifest.scanDurationSeconds },
             uPersistence: { value: 0 },
             uDiverging: { value: 0 },
+            uColorMin: { value: 0 },
+            uColorMax: { value: 1 },
           },
           vertexShader: SWEEP_VERTEX_SHADER,
           fragmentShader: SWEEP_FRAGMENT_SHADER,
@@ -549,6 +575,8 @@ export default function MisaViewer() {
           recordCounts: recordLookup.counts,
           positions,
           beamGeometry,
+          altitudeGrid,
+          beamFootprints,
           antenna,
           renderer,
           controls,
@@ -564,6 +592,12 @@ export default function MisaViewer() {
         );
         currentTimeRef.current = start;
         setManifest(loadedManifest);
+        setColorLimits({
+          logNe: [...loadedManifest.parameterRanges.logNe],
+          ti: [...loadedManifest.parameterRanges.ti],
+          te: [...loadedManifest.parameterRanges.te],
+          vi: [...loadedManifest.parameterRanges.vi],
+        });
         setCurrentTime(start);
         setLoading(false);
 
@@ -601,7 +635,7 @@ export default function MisaViewer() {
           const delta = Math.min(0.1, (now - last) / 1000);
           last = now;
           if (playingRef.current) {
-            let next = currentTimeRef.current + delta * PLAYBACK_RATE;
+            let next = currentTimeRef.current + delta * playbackRateRef.current;
             if (next > loadedManifest.endUnix) next = loadedManifest.startUnix;
             currentTimeRef.current = next;
             if (now - lastUiUpdateRef.current > 70) {
@@ -733,17 +767,51 @@ export default function MisaViewer() {
     engine.material.uniforms.uPersistence.value = fadeHistory ? 0 : 1;
   }, [fadeHistory]);
 
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    setAltitudeLabelsVisible(engine.altitudeGrid, showAxisLabels);
+  }, [showAxisLabels]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.beamFootprints.group.visible = showBeamWidth;
+  }, [showBeamWidth]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    const fullRange = manifest?.parameterRanges[parameter];
+    const limits = colorLimits?.[parameter];
+    if (!engine || !fullRange || !limits) return;
+    const span = Math.max(fullRange[1] - fullRange[0], Number.EPSILON);
+    engine.material.uniforms.uColorMin.value = (limits[0] - fullRange[0]) / span;
+    engine.material.uniforms.uColorMax.value = (limits[1] - fullRange[0]) / span;
+  }, [colorLimits, manifest, parameter]);
+
   const setTime = (value: number) => {
     currentTimeRef.current = value;
     setCurrentTime(value);
   };
 
+  const activeColorLimits = colorLimits?.[parameter] ?? parameterRange;
+  const colorStep = parameterMeta.decimals > 0 ? 10 ** -parameterMeta.decimals : 1;
+
+  const updateColorLimit = (edge: 0 | 1, value: number) => {
+    if (!colorLimits || !parameterRange) return;
+    const current = colorLimits[parameter];
+    const next: [number, number] = [...current];
+    if (edge === 0) next[0] = Math.min(value, next[1] - colorStep);
+    else next[1] = Math.max(value, next[0] + colorStep);
+    setColorLimits({ ...colorLimits, [parameter]: next });
+  };
+
   const legendLabels = useMemo(() => {
-    if (!parameterRange) return ["", "", ""];
+    if (!activeColorLimits) return ["", "", ""];
     const decimals = parameterMeta.decimals;
-    const middle = (parameterRange[0] + parameterRange[1]) / 2;
-    return [parameterRange[0], middle, parameterRange[1]].map((value) => value.toFixed(decimals));
-  }, [parameterMeta.decimals, parameterRange]);
+    const middle = (activeColorLimits[0] + activeColorLimits[1]) / 2;
+    return [activeColorLimits[0], middle, activeColorLimits[1]].map((value) => value.toFixed(decimals));
+  }, [activeColorLimits, parameterMeta.decimals]);
 
   return (
     <main className="viewer-shell">
@@ -756,7 +824,16 @@ export default function MisaViewer() {
         <img src={assetUrl("/assets/mit-haystack.png")} alt="MIT Haystack Observatory" width={978} height={1103} />
       </a>
 
-      <section className="control-deck" aria-label="Playback controls">
+      <section className={`control-deck${controlsCollapsed ? " collapsed" : ""}`} aria-label="Viewer configuration">
+        <button
+          className="collapse-button"
+          type="button"
+          aria-label={controlsCollapsed ? "Show viewer controls" : "Hide viewer controls"}
+          aria-expanded={!controlsCollapsed}
+          onClick={() => setControlsCollapsed((value) => !value)}
+        >
+          {controlsCollapsed ? "☰" : "−"}
+        </button>
         <button
           className="play-button"
           type="button"
@@ -770,7 +847,7 @@ export default function MisaViewer() {
         <div className="time-control">
           <div className="time-row">
             <time>{manifest ? `${formatUtc(currentTime)} UTC` : "Loading observation…"}</time>
-            <span>{playing ? `${PLAYBACK_RATE.toLocaleString()}×` : "SCRUB"}</span>
+            <span>{playing ? `${playbackRate.toLocaleString()}×` : "SCRUB"}</span>
           </div>
           <input
             aria-label="Observation time"
@@ -783,6 +860,18 @@ export default function MisaViewer() {
             disabled={!manifest}
           />
           <div className="range-dates"><span>07 APR</span><span>08 APR</span><span>09 APR 2024</span></div>
+          <label className="speed-control">
+            <span>SPEED <b>{playbackRate.toLocaleString()}×</b></span>
+            <input
+              aria-label="Animation speed"
+              type="range"
+              min="60"
+              max="7200"
+              step="60"
+              value={playbackRate}
+              onChange={(event) => setPlaybackRate(Number(event.target.value))}
+            />
+          </label>
         </div>
 
         <div className="parameter-select">
@@ -792,16 +881,54 @@ export default function MisaViewer() {
               <option key={key} value={key}>{PARAMETER_META[key].label}</option>
             ))}
           </select>
-          <label className="history-toggle">
-            <input type="checkbox" checked={fadeHistory} onChange={(event) => setFadeHistory(event.target.checked)} />
-            <span>FADE HISTORY</span>
-          </label>
+          <div className="toggle-row">
+            <label className="viewer-toggle">
+              <input type="checkbox" checked={fadeHistory} onChange={(event) => setFadeHistory(event.target.checked)} />
+              <span>FADE HISTORY</span>
+            </label>
+            <label className="viewer-toggle">
+              <input type="checkbox" checked={showAxisLabels} onChange={(event) => setShowAxisLabels(event.target.checked)} />
+              <span>AXIS LABELS</span>
+            </label>
+            <label className="viewer-toggle">
+              <input type="checkbox" checked={showBeamWidth} onChange={(event) => setShowBeamWidth(event.target.checked)} />
+              <span>BEAM WIDTH</span>
+            </label>
+          </div>
         </div>
 
         <div className="legend">
           <div className="legend-title"><span className="math-symbol"><ParameterSymbol parameter={parameter} /></span><small>{parameterMeta.unit}</small></div>
           <div className={`colorbar ${parameter === "vi" ? "seismic" : "turbo"}`} />
           <div className="legend-values">{legendLabels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
+          {parameterRange && activeColorLimits && (
+            <div className="color-limit-controls">
+              <label>
+                <span>MIN <b>{activeColorLimits[0].toFixed(parameterMeta.decimals)}</b></span>
+                <input
+                  aria-label="Colorbar minimum"
+                  type="range"
+                  min={parameterRange[0]}
+                  max={parameterRange[1]}
+                  step="any"
+                  value={activeColorLimits[0]}
+                  onChange={(event) => updateColorLimit(0, Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>MAX <b>{activeColorLimits[1].toFixed(parameterMeta.decimals)}</b></span>
+                <input
+                  aria-label="Colorbar maximum"
+                  type="range"
+                  min={parameterRange[0]}
+                  max={parameterRange[1]}
+                  step="any"
+                  value={activeColorLimits[1]}
+                  onChange={(event) => updateColorLimit(1, Number(event.target.value))}
+                />
+              </label>
+            </div>
+          )}
         </div>
       </section>
 
