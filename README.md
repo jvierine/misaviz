@@ -4,6 +4,8 @@ Browser-only Three.js/WebGL visualization of the Millstone Hill Ionospheric
 Steerable Antenna (MISA) uncoded long-pulse observations from 7–9 April 2024.
 The deployed viewer is available at [juha.no/misa](https://juha.no/misa/).
 
+[![MISA Eclipse Scan Viewer](docs/misa-preview.jpg)](https://juha.no/misa/)
+
 ## Features
 
 - Native unsmoothed radar measurement cells with selectable plasma parameter
